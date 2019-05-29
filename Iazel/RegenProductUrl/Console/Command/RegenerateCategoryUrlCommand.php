@@ -141,7 +141,7 @@ class RegenerateCategoryUrlCommand extends Command
     }
     
     /**
-     * Remove entries with request_path='' to prevent error 404 for "http://site.com/" address.
+     * Remove entries with request_path='' or '/' to prevent error 404 or to many redirects for "http://site.com/" address.
      *
      * @param \Magento\UrlRewrite\Service\V1\Data\UrlRewrite[] $newUrls
      * @return \Magento\UrlRewrite\Service\V1\Data\UrlRewrite[]
@@ -151,7 +151,7 @@ class RegenerateCategoryUrlCommand extends Command
         $result = [];
         foreach ($newUrls as $key => $url) {
             $requestPath = $url->getRequestPath();
-            if (!empty($requestPath)) {
+            if (!empty($requestPath) && $requestPath !== '/') {
                 $result[$key] = $url;
             }
         }
