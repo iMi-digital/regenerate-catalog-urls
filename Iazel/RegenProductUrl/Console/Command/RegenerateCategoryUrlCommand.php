@@ -1,7 +1,12 @@
 <?php
 namespace Iazel\RegenProductUrl\Console\Command;
 
+use Magento\Catalog\Model\Category;
+use Magento\Catalog\Model\CategoryRepository;
+use Magento\Catalog\Model\CategoryRepository\Proxy;
+use Magento\CatalogUrlRewrite\Model\CategoryUrlPathGenerator;
 use Magento\Framework\App\Area;
+use Magento\Framework\Exception\CouldNotSaveException;
 use Magento\Store\Model\App\Emulation;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputOption;
@@ -49,13 +54,26 @@ class RegenerateCategoryUrlCommand extends Command
     private $emulation;
 
     /**
+     * @var CategoryRepository
+     */
+    private $categoryRepository;
+
+    /**
+     * @var CategoryUrlPathGenerator
+     */
+    private $categoryUrlPathGenerator;
+
+    /**
      * RegenerateCategoryUrlCommand constructor.
+     *
      * @param State $state
      * @param Collection\Proxy $collection
      * @param CategoryUrlRewriteGenerator\Proxy $categoryUrlRewriteGenerator
      * @param UrlPersistInterface\Proxy $urlPersist
      * @param CategoryCollectionFactory\Proxy $categoryCollectionFactory
      * @param Emulation\Proxy $emulation
+     * @param CategoryRepository $categoryRepository
+     * @param CategoryUrlPathGenerator $categoryUrlPathGenerator
      */
     public function __construct(
         State $state,
@@ -63,7 +81,9 @@ class RegenerateCategoryUrlCommand extends Command
         CategoryUrlRewriteGenerator\Proxy $categoryUrlRewriteGenerator,
         UrlPersistInterface\Proxy $urlPersist,
         CategoryCollectionFactory\Proxy $categoryCollectionFactory,
-        Emulation\Proxy $emulation
+        Emulation\Proxy $emulation,
+        CategoryRepository $categoryRepository,
+        CategoryUrlPathGenerator $categoryUrlPathGenerator
     ) {
         $this->state = $state;
         $this->collection = $collection;
@@ -73,6 +93,8 @@ class RegenerateCategoryUrlCommand extends Command
 
         parent::__construct();
         $this->emulation = $emulation;
+        $this->categoryRepository = $categoryRepository;
+        $this->categoryUrlPathGenerator = $categoryUrlPathGenerator;
     }
 
     protected function configure()
@@ -89,8 +111,13 @@ class RegenerateCategoryUrlCommand extends Command
                 InputOption::VALUE_REQUIRED,
                 'Use the specific Store View',
                 Store::DEFAULT_STORE_ID
-            )
-        ;
+            )->addOption(
+                'url-keys',
+                null,
+                InputOption::VALUE_OPTIONAL,
+                'Regenerate the url keys',
+                false
+            );
         return parent::configure();
     }
 
@@ -114,9 +141,27 @@ class RegenerateCategoryUrlCommand extends Command
             $categories->addAttributeToFilter('entity_id', ['in' => $cids]);
         }
 
+        $regenerateUrlKey = $inp->getOption('url-keys');
         $regenerated = 0;
+        /** @var Category $category */
         foreach($categories as $category)
         {
+            if ($regenerateUrlKey !== false) {
+                $oldUrlKey = $category->getUrlKey();
+                $category->setUrlKey(null);
+                $newUrlKey = $this->categoryUrlPathGenerator->getUrlKey($category);
+                $category->setUrlKey($newUrlKey);
+                try {
+                    $this->categoryRepository->save($category);
+                    $out->writeln(sprintf('<info>Changed url key from "%s" to "%s" for category "%s" (%d)</info>',
+                        $oldUrlKey, $newUrlKey, $category->getName(), $category->getId()));
+                } catch (CouldNotSaveException $e) {
+                    $out->writeln(sprintf('<error>Couldn\'t save category "%s"(%d) with new url key (%s).</error>',
+                        $category->getName(), $category->getId(), $newUrlKey));
+                    $out->writeln(sprintf('<error>%s</error>', $e->getMessage()));
+                }
+            }
+
             $out->writeln('Regenerating urls for ' . $category->getName() . ' (' . $category->getId() . ')');
 
             $this->urlPersist->deleteByData([
@@ -141,7 +186,7 @@ class RegenerateCategoryUrlCommand extends Command
     }
     
     /**
-     * Remove entries with request_path='' to prevent error 404 for "http://site.com/" address.
+     * Remove entries with request_path='' or '/' to prevent error 404 or to many redirects for "http://site.com/" address.
      *
      * @param \Magento\UrlRewrite\Service\V1\Data\UrlRewrite[] $newUrls
      * @return \Magento\UrlRewrite\Service\V1\Data\UrlRewrite[]
@@ -151,10 +196,10 @@ class RegenerateCategoryUrlCommand extends Command
         $result = [];
         foreach ($newUrls as $key => $url) {
             $requestPath = $url->getRequestPath();
-            if (!empty($requestPath)) {
+            if (!empty($requestPath) && $requestPath !== '/') {
                 $result[$key] = $url;
             }
         }
         return $result;
-    }    
+    }
 }
