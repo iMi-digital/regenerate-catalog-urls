@@ -92,6 +92,12 @@ class RegenerateCmsPageUrlCommand extends Command
                 InputOption::VALUE_OPTIONAL,
                 'Regenerate for all stores.',
                 false
+            )->addOption(
+                'include-disabled',
+                null,
+                InputOption::VALUE_OPTIONAL,
+                'Include disabled pages.',
+                false
             );
     }
 
@@ -118,6 +124,10 @@ class RegenerateCmsPageUrlCommand extends Command
 
         if (!$input->getOption('all-stores') !== false) {
             $pages->addStoreFilter($storeId);
+        }
+
+        if (!$input->getOption('include-disabled') !== false) {
+            $pages->addFieldToFilter('is_active', ['eq' => true]);
         }
 
         if (count($input->getArgument('pids')) > 0) {
